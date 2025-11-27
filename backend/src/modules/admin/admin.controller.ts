@@ -2,6 +2,7 @@ import type { Response } from "express";
 import bcrypt from "bcryptjs";
 import { StatusCodes } from "http-status-codes";
 import { Role } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import { parseStudentCsv } from "../../utils/csv";
@@ -78,13 +79,41 @@ export async function listUsers(_req: AuthenticatedRequest, res: Response) {
   return res.json({ users });
 }
 
-export async function listLogs(_req: AuthenticatedRequest, res: Response) {
+export async function listLogs(req: AuthenticatedRequest, res: Response) {
+  const scopeParam = (req.query.scope as string | undefined)?.toLowerCase();
+  const isSuperAdmin = req.user?.role === Role.SUPER_ADMIN;
+
+  let where: Prisma.LogWhereInput | undefined;
+
+  if (!isSuperAdmin) {
+    where = {
+      OR: [
+        { user: { role: Role.STUDENT } },
+        { userId: null },
+      ],
+    };
+  } else if (scopeParam === "admins") {
+    where = {
+      user: {
+        role: { in: [Role.ADMIN, Role.SUPER_ADMIN] },
+      },
+    };
+  } else if (scopeParam === "users") {
+    where = {
+      OR: [
+        { user: { role: Role.STUDENT } },
+        { userId: null },
+      ],
+    };
+  }
+
   const logs = await prisma.log.findMany({
     orderBy: { createdAt: "desc" },
     take: 200,
+    where,
     include: {
       user: {
-        select: { stdId: true, name: true },
+        select: { stdId: true, name: true, role: true },
       },
     },
   });

@@ -3,10 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import "./index.css";
 import { api } from "./lib/api";
-import type { Election, User } from "./types";
+import type { Election, ElectionResult, User } from "./types";
 
 type View = "landing" | "candidate" | "elections" | "admin";
-type AdminTab = "elections" | "candidates" | "users" | "technical";
+type AdminTab = "elections" | "candidates" | "users" | "logs";
 
 type CandidateReview = {
   id: string;
@@ -42,6 +42,18 @@ type LoadingState = {
   election: boolean;
 };
 
+type LogEntry = {
+  id: string;
+  action: string;
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+  user?: {
+    stdId?: string | null;
+    name?: string | null;
+    role?: "SUPER_ADMIN" | "ADMIN" | "STUDENT";
+  } | null;
+};
+
 const featureCards = [
   {
     title: "Secure Voting",
@@ -67,7 +79,7 @@ const adminTabs: { id: AdminTab; label: string; icon: string }[] = [
   { id: "elections", label: "Elections", icon: "[E]" },
   { id: "candidates", label: "Candidates", icon: "[C]" },
   { id: "users", label: "Users", icon: "[U]" },
-  { id: "technical", label: "Technical", icon: "[T]" },
+  { id: "logs", label: "Logs", icon: "📝" },
 ];
 
 const SOMALIA_TIMEZONE = "Africa/Mogadishu";
@@ -107,6 +119,11 @@ function App() {
     [],
   );
   const [userDirectory, setUserDirectory] = useState<UserSummary[]>([]);
+  const [results, setResults] = useState<Record<string, ElectionResult[]>>({});
+  const [resultsLoading, setResultsLoading] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logScope, setLogScope] = useState<"all" | "users" | "admins">("users");
   const [toast, setToast] = useState<ToastState | null>(null);
   const [loading, setLoading] = useState<LoadingState>({
     login: false,
@@ -170,6 +187,25 @@ function App() {
     }
   }, [notify, token]);
 
+  const fetchLogs = useCallback(
+    async (scope: "all" | "users" | "admins") => {
+      if (!token) return;
+      try {
+        setLogsLoading(true);
+        const query = scope === "all" ? "" : `?scope=${scope}`;
+        const data = await api<{ logs: LogEntry[] }>(`/admin/logs${query}`, {
+          token,
+        });
+        setLogs(data.logs);
+      } catch (error) {
+        notify((error as Error).message, "error");
+      } finally {
+        setLogsLoading(false);
+      }
+    },
+    [notify, token],
+  );
+
   useEffect(() => {
     fetchElections();
   }, [fetchElections]);
@@ -209,7 +245,26 @@ function App() {
     if (adminTab === "users") {
       fetchUsers();
     }
-  }, [adminTab, fetchCandidateReviews, fetchUsers, isAdmin, view]);
+    if (adminTab === "logs") {
+      const desiredScope = isSuperAdmin ? logScope : "users";
+      fetchLogs(desiredScope);
+    }
+  }, [
+    adminTab,
+    fetchCandidateReviews,
+    fetchLogs,
+    fetchUsers,
+    isAdmin,
+    isSuperAdmin,
+    logScope,
+    view,
+  ]);
+
+  useEffect(() => {
+    if (!isSuperAdmin && logScope !== "users") {
+      setLogScope("users");
+    }
+  }, [isSuperAdmin, logScope]);
 
   const userInitials = useMemo(() => {
     if (!user?.name) return "";
@@ -220,6 +275,14 @@ function App() {
       .slice(0, 2)
       .toUpperCase();
   }, [user]);
+
+  const formatJoinDate = useCallback((value: string) => {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }, []);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -302,6 +365,8 @@ function App() {
     setToken(null);
     setUser(null);
     setView("landing");
+    setResults({});
+    setLogs([]);
     notify("Signed out.");
   };
 
@@ -368,6 +433,28 @@ function App() {
     }
   };
 
+  const loadResults = useCallback(
+    async (electionId: string) => {
+      if (!token) {
+        notify("Login to view live results.", "error");
+        return;
+      }
+      try {
+        setResultsLoading(electionId);
+        const data = await api<{ results: ElectionResult[] }>(
+          `/votes/election/${electionId}`,
+          { token },
+        );
+        setResults((prev) => ({ ...prev, [electionId]: data.results }));
+      } catch (error) {
+        notify((error as Error).message, "error");
+      } finally {
+        setResultsLoading(null);
+      }
+    },
+    [notify, token],
+  );
+
   const handleVote = async (electionId: string, candidateId: string) => {
     if (!token) {
       notify("Login to vote in this election.", "error");
@@ -380,6 +467,7 @@ function App() {
         body: { electionId, candidateId },
       });
       notify("Vote submitted successfully.");
+      await loadResults(electionId);
     } catch (error) {
       notify((error as Error).message, "error");
     }
@@ -578,46 +666,108 @@ function App() {
       {elections.length === 0 ? (
         <div className="empty-state">No elections available</div>
       ) : (
-        elections.map((election) => (
-          <article className="election-card" key={election.id}>
-            <div className="card-header">
-              <div>
-                <h3>{election.title}</h3>
-                <p className="muted">{election.description}</p>
+        elections.map((election) => {
+          const electionResults = results[election.id];
+          const totalVotes = electionResults?.reduce((sum, row) => sum + row.votes, 0) ?? 0;
+          const sortedResults = electionResults
+            ? [...electionResults].sort((a, b) => b.votes - a.votes)
+            : [];
+          const topThree = sortedResults.slice(0, 3);
+
+          return (
+            <article className="election-card" key={election.id}>
+              <div className="card-header">
+                <div>
+                  <h3>{election.title}</h3>
+                  <p className="muted">{election.description}</p>
+                </div>
+                <span className={`status-pill status-${election.status.toLowerCase()}`}>
+                  {election.status}
+                </span>
               </div>
-              <span className={`status-pill status-${election.status.toLowerCase()}`}>
-                {election.status}
-              </span>
-            </div>
-            <p className="muted">
-              Start: {formatSomaliaTime(election.startTime)}
-              <br />
-              End: {formatSomaliaTime(election.endTime)}
-            </p>
-            {election.candidates.length === 0 ? (
-              <p className="muted">No approved candidates yet.</p>
-            ) : (
-              <div className="candidate-list">
-                {election.candidates.map((candidate) => (
-                  <div className="candidate-row" key={candidate.id}>
-                    <div>
-                      <strong>{candidate.name}</strong>
-                      <p className="muted">{candidate.party ?? "Independent"}</p>
+              <p className="muted">
+                Start: {formatSomaliaTime(election.startTime)}
+                <br />
+                End: {formatSomaliaTime(election.endTime)}
+              </p>
+              {election.candidates.length === 0 ? (
+                <p className="muted">No approved candidates yet.</p>
+              ) : (
+                <div className="candidate-list">
+                  {election.candidates.map((candidate) => (
+                    <div className="candidate-row" key={candidate.id}>
+                      <div>
+                        <strong>{candidate.name}</strong>
+                        <p className="muted">{candidate.party ?? "Independent"}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        disabled={election.status !== "OPEN"}
+                        onClick={() => handleVote(election.id, candidate.id)}
+                      >
+                        {election.status === "OPEN" ? "Vote" : election.status}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      disabled={election.status !== "OPEN"}
-                      onClick={() => handleVote(election.id, candidate.id)}
-                    >
-                      {election.status === "OPEN" ? "Vote" : election.status}
-                    </button>
+                  ))}
+                </div>
+              )}
+              {token && (
+                <div className="results-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => loadResults(election.id)}
+                    disabled={resultsLoading === election.id}
+                  >
+                    {resultsLoading === election.id
+                      ? "Refreshing results..."
+                      : electionResults
+                        ? "Refresh live results"
+                        : "View live results"}
+                  </button>
+                  {totalVotes > 0 && (
+                    <span className="muted">Total votes cast: {totalVotes}</span>
+                  )}
+                </div>
+              )}
+              {electionResults && (
+                <div className="live-results">
+                  {topThree.length > 0 && (
+                    <div className="top-three">
+                      {topThree.map((candidate, index) => (
+                        <div className={`top-card top-card-${index + 1}`} key={candidate.id}>
+                          <span className={`badge badge-${index + 1}`}>#{index + 1}</span>
+                          <div>
+                            <strong>{candidate.name}</strong>
+                            <p className="muted">{candidate.party ?? "Independent"}</p>
+                          </div>
+                          <span>{candidate.votes} votes</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="results-list">
+                    {sortedResults.map((row) => {
+                      const percent = totalVotes ? Math.round((row.votes / totalVotes) * 100) : 0;
+                      return (
+                        <div className="result-row" key={row.id}>
+                          <div className="result-row-header">
+                            <span>{row.name}</span>
+                            <span>{percent}%</span>
+                          </div>
+                          <div className="progress">
+                            <div className="progress-bar" style={{ width: `${percent}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            )}
-          </article>
-        ))
+                </div>
+              )}
+            </article>
+          );
+        })
       )}
     </section>
   );
@@ -848,18 +998,25 @@ function App() {
                           });
                         }
 
+                        const roleLabel =
+                          entry.role === "STUDENT"
+                            ? "Voter"
+                            : entry.role === "ADMIN"
+                              ? "Admin"
+                              : "Super Admin";
                         return (
                           <div className="user-card" key={entry.id}>
                             <div>
                               <strong>{entry.name}</strong>
                               <p className="muted">
-                                {entry.email} • {entry.stdId} •{" "}
-                                {entry.isVerified ? "Verified" : "Pending"}
+                                {entry.email} • {entry.stdId} • Joined{" "}
+                                {formatJoinDate(entry.createdAt)} •{" "}
+                                {entry.isVerified ? "Verified" : "Pending verification"}
                               </p>
                             </div>
                             <div className="user-row-actions">
                               <span className="status-pill role-pill">
-                                {entry.role.replace("_", " ")}
+                                {roleLabel}
                               </span>
                               {isSuperAdmin && entry.id !== user?.id && promoteButtons.length > 0 && (
                                 <div className="user-actions">
@@ -892,13 +1049,58 @@ function App() {
               )}
             </div>
           )}
-          {adminTab === "technical" && (
+          {adminTab === "logs" && (
             <div className="panel admin-panel">
-              <h3>Technical Support</h3>
-              <p className="muted">
-                Reach out to the technical team for infrastructure, monitoring, and
-                incident response support.
-              </p>
+              <div className="admin-heading">
+                <div>
+                  <h3>Audit trail</h3>
+                  <p className="muted">
+                    Track {isSuperAdmin ? "user and admin" : "user"} activity in real time.
+                  </p>
+                </div>
+                {isSuperAdmin && (
+                  <label className="log-filter">
+                    Scope
+                    <select
+                      value={logScope}
+                      onChange={(event) =>
+                        setLogScope(event.target.value as "all" | "users" | "admins")
+                      }
+                    >
+                      <option value="users">Users</option>
+                      <option value="admins">Admins</option>
+                      <option value="all">All</option>
+                    </select>
+                  </label>
+                )}
+              </div>
+              {logsLoading ? (
+                <div className="empty-state">Loading logs...</div>
+              ) : logs.length === 0 ? (
+                <div className="empty-state">No log entries yet.</div>
+              ) : (
+                <div className="log-list">
+                  {logs.map((log) => (
+                    <div className="log-row" key={log.id}>
+                      <div>
+                        <strong>{log.action.replace(/_/g, " ")}</strong>
+                        <p className="muted">
+                          {(log.user?.name ?? "System") +
+                            " • " +
+                            (log.user?.stdId ?? "N/A") +
+                            " • " +
+                            new Date(log.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      {log.meta && Object.keys(log.meta).length > 0 && (
+                        <code className="log-meta">
+                          {JSON.stringify(log.meta)}
+                        </code>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </>

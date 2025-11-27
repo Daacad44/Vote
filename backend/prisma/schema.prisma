@@ -14,6 +14,7 @@ generator client {
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   STUDENT
 }

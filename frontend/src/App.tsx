@@ -24,7 +24,7 @@ type UserSummary = {
   stdId: string;
   name: string;
   email: string;
-  role: "ADMIN" | "STUDENT";
+  role: "SUPER_ADMIN" | "ADMIN" | "STUDENT";
   isVerified: boolean;
   createdAt: string;
 };
@@ -120,6 +120,10 @@ function App() {
   const [otpStdId, setOtpStdId] = useState("");
   const [candidateForm, setCandidateForm] = useState(initialCandidateForm);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [roleMutationId, setRoleMutationId] = useState<string | null>(null);
+
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const isAdmin = Boolean(user && (user.role === "ADMIN" || isSuperAdmin));
 
   const notify = useCallback(
     (message: string, type: ToastState["type"] = "success") => {
@@ -198,14 +202,14 @@ function App() {
   }, [user]);
 
   useEffect(() => {
-    if (view !== "admin" || user?.role !== "ADMIN") return;
+    if (view !== "admin" || !isAdmin) return;
     if (adminTab === "candidates") {
       fetchCandidateReviews();
     }
     if (adminTab === "users") {
       fetchUsers();
     }
-  }, [adminTab, fetchCandidateReviews, fetchUsers, user, view]);
+  }, [adminTab, fetchCandidateReviews, fetchUsers, isAdmin, view]);
 
   const userInitials = useMemo(() => {
     if (!user?.name) return "";
@@ -378,6 +382,27 @@ function App() {
       notify("Vote submitted successfully.");
     } catch (error) {
       notify((error as Error).message, "error");
+    }
+  };
+
+  const handleRoleChange = async (targetId: string, role: User["role"]) => {
+    if (!token) {
+      notify("Authentication required.", "error");
+      return;
+    }
+    try {
+      setRoleMutationId(`${targetId}-${role}`);
+      await api(`/admin/users/${targetId}/role`, {
+        method: "PATCH",
+        token,
+        body: { role },
+      });
+      notify("User role updated.");
+      await fetchUsers();
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setRoleMutationId(null);
     }
   };
 
@@ -603,7 +628,7 @@ function App() {
         <h2>Admin Dashboard</h2>
         <p className="muted">Manage elections, candidates, users, and system settings</p>
       </div>
-      {user?.role !== "ADMIN" ? (
+      {!isAdmin ? (
         <div className="empty-state">Admin access is required to view this area.</div>
       ) : (
         <>
@@ -625,17 +650,24 @@ function App() {
               <div className="admin-heading">
                 <div>
                   <h3>Election Management</h3>
-                  <p className="muted">All times are shown in Somalia Time (GMT+3)</p>
+                  <p className="muted">
+                    All times are shown in Somalia Time (GMT+3).{" "}
+                    {isSuperAdmin
+                      ? "You have full control over creating and updating elections."
+                      : "Read-only access. Contact a super admin to make changes."}
+                  </p>
                 </div>
-                <button
-                  className="primary-btn"
-                  type="button"
-                  onClick={() => setShowCreateForm((prev) => !prev)}
-                >
-                  {showCreateForm ? "Close" : "+ Create Election"}
-                </button>
+                {isSuperAdmin && (
+                  <button
+                    className="primary-btn"
+                    type="button"
+                    onClick={() => setShowCreateForm((prev) => !prev)}
+                  >
+                    {showCreateForm ? "Close" : "+ Create Election"}
+                  </button>
+                )}
               </div>
-              {showCreateForm && (
+              {isSuperAdmin && showCreateForm && (
                 <form className="stack" onSubmit={handleCreateElection}>
                   <div className="field">
                     <label>Title</label>
@@ -657,6 +689,11 @@ function App() {
                     {loading.election ? "Saving..." : "Save Election"}
                   </button>
                 </form>
+              )}
+              {!isSuperAdmin && (
+                <div className="empty-state">
+                  Only SUPER_ADMIN accounts can create or update elections.
+                </div>
               )}
               {elections.length === 0 && <div className="empty-state">No elections yet.</div>}
               {elections.map((election) => (
@@ -731,24 +768,127 @@ function App() {
           )}
           {adminTab === "users" && (
             <div className="panel admin-panel">
-              <h3>Users</h3>
+              <div className="admin-heading">
+                <div>
+                  <h3>User Directory</h3>
+                  <p className="muted">
+                    Segment super admins, admins, and verified voters. Only super admins
+                    can change roles.
+                  </p>
+                </div>
+              </div>
               {userDirectory.length === 0 ? (
                 <div className="empty-state">No users found.</div>
               ) : (
-                <div className="user-table">
-                  <div className="user-row user-row-header">
-                    <span>Name</span>
-                    <span>Student ID</span>
-                    <span>Status</span>
-                  </div>
-                  {userDirectory.map((entry) => (
-                    <div className="user-row" key={entry.id}>
-                      <span>{entry.name}</span>
-                      <span>{entry.stdId}</span>
-                      <span>{entry.isVerified ? "Verified" : "Pending"}</span>
+                [
+                  {
+                    key: "super",
+                    title: "Super Admins",
+                    description: "Complete platform control",
+                    entries: userDirectory.filter((entry) => entry.role === "SUPER_ADMIN"),
+                  },
+                  {
+                    key: "admins",
+                    title: "Admins",
+                    description: "Election and candidate management",
+                    entries: userDirectory.filter((entry) => entry.role === "ADMIN"),
+                  },
+                  {
+                    key: "students",
+                    title: "Users",
+                    description: "Verified voters and candidates",
+                    entries: userDirectory.filter((entry) => entry.role === "STUDENT"),
+                  },
+                ].map((group) => (
+                  <div className="user-group" key={group.key}>
+                    <div className="user-group-header">
+                      <div>
+                        <h4>{group.title}</h4>
+                        <p className="muted">{group.description}</p>
+                      </div>
+                      <span className="group-count">
+                        {group.entries.length}{" "}
+                        {group.entries.length === 1 ? "member" : "members"}
+                      </span>
                     </div>
-                  ))}
-                </div>
+                    {group.entries.length === 0 ? (
+                      <div className="empty-state">No {group.title.toLowerCase()} yet.</div>
+                    ) : (
+                      group.entries.map((entry) => {
+                        const promoteButtons: Array<{
+                          label: string;
+                          role: User["role"];
+                          tone: "primary" | "danger";
+                        }> = [];
+
+                        if (entry.role === "STUDENT") {
+                          promoteButtons.push({
+                            label: "Promote to Admin",
+                            role: "ADMIN",
+                            tone: "primary",
+                          });
+                        }
+                        if (entry.role === "ADMIN") {
+                          promoteButtons.push({
+                            label: "Promote to Super",
+                            role: "SUPER_ADMIN",
+                            tone: "primary",
+                          });
+                          promoteButtons.push({
+                            label: "Demote to User",
+                            role: "STUDENT",
+                            tone: "danger",
+                          });
+                        }
+                        if (entry.role === "SUPER_ADMIN") {
+                          promoteButtons.push({
+                            label: "Demote to Admin",
+                            role: "ADMIN",
+                            tone: "danger",
+                          });
+                        }
+
+                        return (
+                          <div className="user-card" key={entry.id}>
+                            <div>
+                              <strong>{entry.name}</strong>
+                              <p className="muted">
+                                {entry.email} • {entry.stdId} •{" "}
+                                {entry.isVerified ? "Verified" : "Pending"}
+                              </p>
+                            </div>
+                            <div className="user-row-actions">
+                              <span className="status-pill role-pill">
+                                {entry.role.replace("_", " ")}
+                              </span>
+                              {isSuperAdmin && entry.id !== user?.id && promoteButtons.length > 0 && (
+                                <div className="user-actions">
+                                  {promoteButtons.map((action) => {
+                                    const key = `${entry.id}-${action.role}`;
+                                    const busy = roleMutationId === key;
+                                    return (
+                                      <button
+                                        key={key}
+                                        type="button"
+                                        className={`user-action-btn ${
+                                          action.tone === "danger" ? "danger" : ""
+                                        }`}
+                                        disabled={busy}
+                                        onClick={() => handleRoleChange(entry.id, action.role)}
+                                      >
+                                        {busy ? "Updating..." : action.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ))
               )}
             </div>
           )}

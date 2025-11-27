@@ -15,13 +15,13 @@ router.post("/apply", authenticate, applyForCandidacy);
 router.get(
   "/review",
   authenticate,
-  requireRoles(Role.ADMIN),
+  requireRoles(Role.ADMIN, Role.SUPER_ADMIN),
   reviewCandidates,
 );
 router.patch(
   "/:id/approval",
   authenticate,
-  requireRoles(Role.ADMIN),
+  requireRoles(Role.ADMIN, Role.SUPER_ADMIN),
   updateCandidateApproval,
 );
 

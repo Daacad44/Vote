@@ -6,6 +6,7 @@ import {
   importStudents,
   listLogs,
   listUsers,
+  updateUserRole,
 } from "./admin.controller";
 
 const upload = multer({
@@ -15,10 +16,21 @@ const upload = multer({
 
 const router = Router();
 
-router.use(authenticate, requireRoles(Role.ADMIN));
+router.use(authenticate);
+router.use(requireRoles(Role.ADMIN, Role.SUPER_ADMIN));
 
-router.post("/users/import", upload.single("file"), importStudents);
+router.post(
+  "/users/import",
+  requireRoles(Role.SUPER_ADMIN),
+  upload.single("file"),
+  importStudents,
+);
 router.get("/users", listUsers);
 router.get("/logs", listLogs);
+router.patch(
+  "/users/:id/role",
+  requireRoles(Role.SUPER_ADMIN),
+  updateUserRole,
+);
 
 export const adminRoutes = router;

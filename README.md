@@ -37,15 +37,17 @@ npm run dev
 
 ### Key environment variables
 
-- `DATABASE_URL` â€“ Postgres connection string
-- `JWT_SECRET` â€“ long random string
-- `VOTE_AES_KEY_BASE64` â€“ base64 encoded 32â€‘byte key (e.g. `openssl rand -base64 32`)
-- `SOCKET_ORIGIN` â€“ comma separated origins allowed for CORS/Socket.io (e.g. `http://localhost:5173`)
+- `DATABASE_URL` – Postgres connection string
+- `JWT_SECRET` – long random string
+- `VOTE_AES_KEY_BASE64` – base64 encoded 32-byte key (e.g. `openssl rand -base64 32`)
+- `SOCKET_ORIGIN` – comma separated origins allowed for CORS/Socket.io (e.g. `http://localhost:5173`)
+- `SUPER_ADMIN_*` – credentials/faculty metadata for the bootstrap super admin created by `npm run prisma:seed`
+
 
 ### Notable features
 
 - OTP lifecycle (`/auth/register`, `/auth/otp/*`) with nodemailer preview fallback
-- Admin uploads CSV of students, manages elections, exports CSV results
+- Admin uploads CSV of students, manages elections, exports CSV results (SUPER_ADMIN only for elevated actions)
 - AES-256-GCM encrypted ballots + nonce storage + double vote prevention
 - Prisma models for `User`, `Election`, `Candidate`, `Vote`, `Log`, `OtpCode`
 - Audit log service records admin/vote actions
@@ -97,3 +99,6 @@ The SPA exposes:
 | 13â€‘14 | Bugfix, optimize, finalize docs, prep launch                           |
 
 > _â€œMay Allah bless this project and make it a source of khayr.â€_
+
+
+

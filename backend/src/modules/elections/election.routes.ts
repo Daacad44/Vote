@@ -11,12 +11,17 @@ import {
 const router = Router();
 
 router.get("/", listElections);
-router.post("/", authenticate, requireRoles(Role.ADMIN), createElection);
-router.put("/:id", authenticate, requireRoles(Role.ADMIN), updateElection);
+router.post("/", authenticate, requireRoles(Role.SUPER_ADMIN), createElection);
+router.put(
+  "/:id",
+  authenticate,
+  requireRoles(Role.SUPER_ADMIN),
+  updateElection,
+);
 router.patch(
   "/:id/status",
   authenticate,
-  requireRoles(Role.ADMIN),
+  requireRoles(Role.SUPER_ADMIN),
   changeElectionStatus,
 );
 

@@ -21,7 +21,7 @@ export type User = {
   name: string;
   stdId: string;
   email: string;
-  role: "ADMIN" | "STUDENT";
+  role: "SUPER_ADMIN" | "ADMIN" | "STUDENT";
   faculty?: string | null;
   department?: string | null;
 };

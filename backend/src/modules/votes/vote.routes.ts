@@ -14,7 +14,7 @@ router.get("/election/:electionId", authenticate, getResults);
 router.get(
   "/election/:electionId/export",
   authenticate,
-  requireRoles(Role.ADMIN),
+  requireRoles(Role.SUPER_ADMIN),
   exportResultsCsv,
 );
 

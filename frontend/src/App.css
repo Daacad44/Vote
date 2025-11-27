@@ -1,0 +1,122 @@
+﻿:root {
+  color: #0f172a;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #f3f8ff 0%, #e8eefc 45%, #f4f6fb 100%);
+}
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before,
+.app-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-image: radial-gradient(rgba(79, 70, 229, 0.3) 0%, transparent 45%), radial-gradient(rgba(14, 165, 233, 0.25) 0%, transparent 40%);
+  background-size: 600px 600px;
+  filter: blur(40px);
+  opacity: 0.4;
+}
+
+.floating-grid {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.25) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.25) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(circle at center, black, transparent 65%);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.9rem 1.1rem;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #6366f1;
+  outline: none;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2);
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  border-radius: 9999px;
+  background: linear-gradient(120deg, #2563eb, #7c3aed 55%, #db2777);
+  color: #fff;
+  font-weight: 600;
+  padding: 0.65rem 1.5rem;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 15px 35px rgba(99, 102, 241, 0.35);
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.01);
+}
+
+.sparkle-border {
+  position: relative;
+  border-radius: 2rem;
+  padding: 1px;
+  background: linear-gradient(120deg, rgba(79, 70, 229, 0.4), transparent 25%),
+    linear-gradient(300deg, rgba(56, 189, 248, 0.4), transparent 30%),
+    linear-gradient(90deg, rgba(236, 72, 153, 0.3), transparent 40%);
+}
+
+.sparkle-border > div {
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.hero-chip {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(15, 23, 42, 0.25);
+  backdrop-filter: blur(6px);
+}
+
+.election-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.03);
+}

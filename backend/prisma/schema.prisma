@@ -1,0 +1,117 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  STUDENT
+}
+
+enum ElectionStatus {
+  DRAFT
+  UPCOMING
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  stdId        String     @unique
+  name         String
+  email        String     @unique
+  faculty      String?
+  department   String?
+  role         Role       @default(STUDENT)
+  passwordHash String
+  isVerified   Boolean    @default(false)
+  otpCodes     OtpCode[]
+  votes        Vote[]     @relation("UserVotes")
+  logs         Log[]
+  candidacies  Candidate[] @relation("CandidateOwner")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  codeHash  String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Election {
+  id          String          @id @default(uuid())
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  status      ElectionStatus  @default(DRAFT)
+  candidates  Candidate[]
+  votes       Vote[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Candidate {
+  id          String    @id @default(uuid())
+  electionId  String
+  ownerId     String?
+  name        String
+  party       String?
+  photoUrl    String?
+  manifesto   String?
+  approved    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  election Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  owner    User?    @relation("CandidateOwner", fields: [ownerId], references: [id])
+  votes    Vote[]
+
+  @@index([electionId, approved])
+}
+
+model Vote {
+  id            String    @id @default(uuid())
+  electionId    String
+  voterId       String
+  candidateId   String?
+  encryptedVote String
+  nonce         String
+  createdAt     DateTime  @default(now())
+
+  election  Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  voter     User     @relation("UserVotes", fields: [voterId], references: [id], onDelete: Cascade)
+  candidate Candidate? @relation(fields: [candidateId], references: [id])
+
+  @@index([electionId])
+  @@unique([electionId, voterId])
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}

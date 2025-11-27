@@ -1,21 +1,100 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { io, type Socket } from "socket.io-client";
 import "./App.css";
 import "./index.css";
-import { SectionCard } from "./components/SectionCard";
 import { api } from "./lib/api";
-import type { Election, ElectionResult, User } from "./types";
+import type { Election, User } from "./types";
+
+type View = "landing" | "candidate" | "elections" | "admin";
+type AdminTab = "elections" | "candidates" | "users" | "technical";
+
+type CandidateReview = {
+  id: string;
+  name: string;
+  party?: string | null;
+  manifesto?: string | null;
+  photoUrl?: string | null;
+  approved: boolean;
+  election: { id: string; title: string };
+  owner?: { name: string | null; stdId: string } | null;
+};
+
+type UserSummary = {
+  id: string;
+  stdId: string;
+  name: string;
+  email: string;
+  role: "ADMIN" | "STUDENT";
+  isVerified: boolean;
+  createdAt: string;
+};
 
 type ToastState = {
   type: "success" | "error";
   message: string;
 };
 
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ?? "http://localhost:4000";
+type LoadingState = {
+  login: boolean;
+  register: boolean;
+  otp: boolean;
+  candidate: boolean;
+  election: boolean;
+};
+
+const featureCards = [
+  {
+    title: "Secure Voting",
+    description:
+      "Advanced encryption and authentication ensure your vote remains private and secure",
+    icon: "[SV]",
+  },
+  {
+    title: "Easy Registration",
+    description:
+      "Simple registration process for voters and candidates with email verification",
+    icon: "[ER]",
+  },
+  {
+    title: "Real-time Results",
+    description:
+      "View live election results and statistics as voting progresses",
+    icon: "[RR]",
+  },
+];
+
+const adminTabs: { id: AdminTab; label: string; icon: string }[] = [
+  { id: "elections", label: "Elections", icon: "[E]" },
+  { id: "candidates", label: "Candidates", icon: "[C]" },
+  { id: "users", label: "Users", icon: "[U]" },
+  { id: "technical", label: "Technical", icon: "[T]" },
+];
+
+const SOMALIA_TIMEZONE = "Africa/Mogadishu";
+
+const initialCandidateForm = {
+  electionId: "",
+  name: "",
+  party: "",
+  photoUrl: "",
+  manifesto: "",
+};
+
+function formatSomaliaTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: SOMALIA_TIMEZONE,
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
 
 function App() {
+  const [view, setView] = useState<View>("landing");
+  const [adminTab, setAdminTab] = useState<AdminTab>("elections");
   const [token, setToken] = useState<string | null>(() =>
     localStorage.getItem("votesecure.token"),
   );
@@ -24,21 +103,31 @@ function App() {
     return raw ? (JSON.parse(raw) as User) : null;
   });
   const [elections, setElections] = useState<Election[]>([]);
-  const [results, setResults] = useState<Record<string, ElectionResult[]>>({});
+  const [candidateReviews, setCandidateReviews] = useState<CandidateReview[]>(
+    [],
+  );
+  const [userDirectory, setUserDirectory] = useState<UserSummary[]>([]);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [otpStdId, setOtpStdId] = useState("");
+  const [loading, setLoading] = useState<LoadingState>({
+    login: false,
+    register: false,
+    otp: false,
+    candidate: false,
+    election: false,
+  });
+  const [showRegister, setShowRegister] = useState(false);
   const [showOtp, setShowOtp] = useState(false);
-  const [socketStatus, setSocketStatus] = useState<
-    "connected" | "disconnected"
-  >("disconnected");
+  const [otpStdId, setOtpStdId] = useState("");
+  const [candidateForm, setCandidateForm] = useState(initialCandidateForm);
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const isAdmin = user?.role === "ADMIN";
-
-  const notify = useCallback((message: string, type: ToastState["type"] = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  }, []);
+  const notify = useCallback(
+    (message: string, type: ToastState["type"] = "success") => {
+      setToast({ message, type });
+      setTimeout(() => setToast(null), 4000);
+    },
+    [],
+  );
 
   const fetchElections = useCallback(async () => {
     try {
@@ -46,13 +135,48 @@ function App() {
       setElections(data.elections);
     } catch (error) {
       console.error(error);
-      notify((error as Error).message);
+      notify((error as Error).message, "error");
     }
   }, [notify]);
+
+  const fetchCandidateReviews = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await api<{ candidates: CandidateReview[] }>(
+        "/candidates/review",
+        {
+          token,
+        },
+      );
+      setCandidateReviews(data.candidates);
+    } catch (error) {
+      notify((error as Error).message, "error");
+    }
+  }, [notify, token]);
+
+  const fetchUsers = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await api<{ users: UserSummary[] }>("/admin/users", {
+        token,
+      });
+      setUserDirectory(data.users);
+    } catch (error) {
+      notify((error as Error).message, "error");
+    }
+  }, [notify, token]);
 
   useEffect(() => {
     fetchElections();
   }, [fetchElections]);
+
+  useEffect(() => {
+    if (!user) {
+      localStorage.removeItem("votesecure.user");
+      return;
+    }
+    localStorage.setItem("votesecure.user", JSON.stringify(user));
+  }, [user]);
 
   useEffect(() => {
     if (token) {
@@ -63,57 +187,74 @@ function App() {
   }, [token]);
 
   useEffect(() => {
-    if (user) {
-      localStorage.setItem("votesecure.user", JSON.stringify(user));
-    } else {
-      localStorage.removeItem("votesecure.user");
+    if (!user) {
+      setCandidateForm(initialCandidateForm);
+      return;
     }
+    setCandidateForm((prev) => ({
+      ...prev,
+      name: prev.name || user.name,
+    }));
   }, [user]);
 
   useEffect(() => {
-    if (!token) {
-      setSocketStatus("disconnected");
-      return;
+    if (view !== "admin" || user?.role !== "ADMIN") return;
+    if (adminTab === "candidates") {
+      fetchCandidateReviews();
     }
+    if (adminTab === "users") {
+      fetchUsers();
+    }
+  }, [adminTab, fetchCandidateReviews, fetchUsers, user, view]);
 
-    const socket: Socket = io(SOCKET_URL);
-    socket.on("connect", () => setSocketStatus("connected"));
-    socket.on("disconnect", () => setSocketStatus("disconnected"));
-    socket.on(
-      "resultsUpdated",
-      (payload: { electionId: string; results: ElectionResult[] }) => {
-        setResults((prev) => ({
-          ...prev,
-          [payload.electionId]: payload.results,
-        }));
-      },
-    );
+  const userInitials = useMemo(() => {
+    if (!user?.name) return "";
+    return user.name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  }, [user]);
 
-    return () => {
-      socket.disconnect();
-    };
-  }, [token]);
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries()) as Record<string, string>;
+    try {
+      setLoading((prev) => ({ ...prev, login: true }));
+      const data = await api<{ token: string; user: User }>("/auth/login", {
+        method: "POST",
+        body: payload,
+      });
+      setToken(data.token);
+      setUser(data.user);
+      notify(`Welcome back, ${data.user.name}!`);
+      event.currentTarget.reset();
+      setView("elections");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setLoading((prev) => ({ ...prev, login: false }));
+    }
+  };
 
   const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, string>;
-
     try {
-      setIsBusy(true);
-      await api("/auth/register", {
-        method: "POST",
-        body: payload,
-      });
-
-      notify("Registered successfully. Check your email for the OTP.");
+      setLoading((prev) => ({ ...prev, register: true }));
+      await api("/auth/register", { method: "POST", body: payload });
+      notify("Registration successful. Check your email for the OTP code.");
       setOtpStdId(payload.stdId as string);
+      setShowRegister(false);
       setShowOtp(true);
       event.currentTarget.reset();
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
-      setIsBusy(false);
+      setLoading((prev) => ({ ...prev, register: false }));
     }
   };
 
@@ -122,7 +263,7 @@ function App() {
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, string>;
     try {
-      setIsBusy(true);
+      setLoading((prev) => ({ ...prev, otp: true }));
       await api("/auth/otp/verify", {
         method: "POST",
         body: payload,
@@ -133,16 +274,15 @@ function App() {
     } catch (error) {
       notify((error as Error).message, "error");
     } finally {
-      setIsBusy(false);
+      setLoading((prev) => ({ ...prev, otp: false }));
     }
   };
 
   const resendOtp = async () => {
     if (!otpStdId) {
-      notify("Register first so we know your student ID.", "error");
+      notify("Provide your student ID first.", "error");
       return;
     }
-
     try {
       await api("/auth/otp/resend", {
         method: "POST",
@@ -154,46 +294,71 @@ function App() {
     }
   };
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(form.entries()) as Record<string, string>;
-    try {
-      setIsBusy(true);
-      const data = await api<{ token: string; user: User }>("/auth/login", {
-        method: "POST",
-        body: payload,
-      });
-      setToken(data.token);
-      setUser(data.user);
-      notify(`Welcome back, ${data.user.name}!`);
-      event.currentTarget.reset();
-    } catch (error) {
-      notify((error as Error).message, "error");
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
   const handleLogout = () => {
     setToken(null);
     setUser(null);
-    setResults({});
+    setView("landing");
     notify("Signed out.");
   };
 
-  const loadResults = async (electionId: string) => {
+  const handleCreateElection = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (!token) {
-      notify("Log in to view secure results.", "error");
+      notify("Admin authentication required.", "error");
       return;
     }
-
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries()) as Record<string, string>;
     try {
-      const data = await api<{ results: ElectionResult[] }>(
-        `/votes/election/${electionId}`,
-        { token },
-      );
-      setResults((prev) => ({ ...prev, [electionId]: data.results }));
+      setLoading((prev) => ({ ...prev, election: true }));
+      await api("/elections", {
+        method: "POST",
+        token,
+        body: payload,
+      });
+      notify("Election created successfully.");
+      setShowCreateForm(false);
+      event.currentTarget.reset();
+      fetchElections();
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setLoading((prev) => ({ ...prev, election: false }));
+    }
+  };
+
+  const handleCandidateSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!token) {
+      notify("Log in to submit an application.", "error");
+      return;
+    }
+    try {
+      setLoading((prev) => ({ ...prev, candidate: true }));
+      await api("/candidates/apply", {
+        method: "POST",
+        token,
+        body: candidateForm,
+      });
+      notify("Application submitted.");
+      setCandidateForm(initialCandidateForm);
+    } catch (error) {
+      notify((error as Error).message, "error");
+    } finally {
+      setLoading((prev) => ({ ...prev, candidate: false }));
+    }
+  };
+
+  const handleCandidateApproval = async (id: string, approved: boolean) => {
+    if (!token) return;
+    try {
+      await api(`/candidates/${id}/approval`, {
+        method: "PATCH",
+        token,
+        body: { approved },
+      });
+      notify(`Candidate ${approved ? "approved" : "rejected"}.`);
+      fetchCandidateReviews();
     } catch (error) {
       notify((error as Error).message, "error");
     }
@@ -201,393 +366,557 @@ function App() {
 
   const handleVote = async (electionId: string, candidateId: string) => {
     if (!token) {
-      notify("Please log in before voting.", "error");
+      notify("Login to vote in this election.", "error");
       return;
     }
-
     try {
       await api("/votes", {
         method: "POST",
         token,
         body: { electionId, candidateId },
       });
-      notify("Vote submitted securely.");
-      await loadResults(electionId);
+      notify("Vote submitted successfully.");
     } catch (error) {
       notify((error as Error).message, "error");
     }
   };
 
-  const handleCreateElection = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!token) return;
-
-    const form = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(form.entries()) as Record<string, string>;
-
-    try {
-      await api("/elections", {
-        method: "POST",
-        token,
-        body: payload,
-      });
-      notify("Election created.");
-      event.currentTarget.reset();
-      fetchElections();
-    } catch (error) {
-      notify((error as Error).message, "error");
-    }
-  };
-
-  const handleImport = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!token) return;
-    const form = new FormData(event.currentTarget);
-    const file = form.get("file") as File | null;
-    if (!file) {
-      notify("Attach a CSV file.", "error");
-      return;
-    }
-    const payload = new FormData();
-    payload.append("file", file);
-    try {
-      await api("/admin/users/import", {
-        method: "POST",
-        token,
-        body: payload,
-      });
-      notify("CSV imported");
-      event.currentTarget.reset();
-    } catch (error) {
-      notify((error as Error).message, "error");
-    }
-  };
-
-  const formatWindow = useCallback((start: string, end: string) => {
-    return `${new Date(start).toLocaleString()} – ${new Date(end).toLocaleString()}`;
-  }, []);
-
-  const heroSubtitle = useMemo(() => {
-    if (user) {
-      return `Logged in as ${user.name} (${user.role}).`;
-    }
-    return "Register, verify via OTP, and start voting securely.";
-  }, [user]);
-
-  return (
-    <div className="min-h-screen bg-slate-50 pb-16">
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <header className="mb-10 rounded-3xl bg-gradient-to-r from-primary to-indigo-600 p-8 text-white shadow-xl">
-          <p className="text-sm font-semibold uppercase tracking-widest">
-            VoteSecure MVP
-          </p>
-          <h1 className="mt-4 text-4xl font-bold">
-            Secure digital elections for every campus
-          </h1>
-          <p className="mt-3 max-w-3xl text-lg text-slate-100">
-            {heroSubtitle}
-          </p>
-          <div className="mt-6 flex flex-wrap gap-4 text-sm text-slate-200">
-            <span>🔐 AES-256 encrypted ballots</span>
-            <span>📡 Live Socket.io results</span>
-            <span>🧾 Audit-ready admin tooling</span>
-            <span>
-              📶 Live updates:{" "}
-              <strong className="font-semibold">
-                {socketStatus === "connected" ? "Online" : "Offline"}
-              </strong>
-            </span>
-          </div>
-          {user && (
-            <button
-              className="mt-6 bg-white/20 px-6 py-2 text-sm font-semibold text-white transition hover:bg-white/30"
-              onClick={handleLogout}
-            >
-              Sign out
+  const renderLanding = () => (
+    <section className="landing">
+      <div className="hero-card">
+        <p className="eyebrow">VoteSecure</p>
+        <h1>Secure Digital Voting</h1>
+        <p className="hero-copy">
+          Participate in transparent, secure, and accessible elections with our
+          advanced voting platform.
+        </p>
+        <div className="feature-grid">
+          {featureCards.map((feature) => (
+            <article className="feature-card" key={feature.title}>
+              <div className="feature-icon">{feature.icon}</div>
+              <h3>{feature.title}</h3>
+              <p>{feature.description}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+      <div className="login-panel">
+        <div className="panel">
+          <h3>Login</h3>
+          <p className="muted">Enter your credentials to access your account</p>
+          <form className="stack" onSubmit={handleLogin}>
+            <div className="field">
+              <label>Email</label>
+              <input
+                name="stdId"
+                placeholder="Email"
+                required
+                disabled={loading.login}
+              />
+            </div>
+            <div className="field">
+              <label>Password</label>
+              <input
+                name="password"
+                type="password"
+                placeholder="Password"
+                required
+                disabled={loading.login}
+              />
+            </div>
+            <button className="primary-btn" type="submit" disabled={loading.login}>
+              {loading.login ? "Signing in..." : "Sign In"}
             </button>
-          )}
-        </header>
+          </form>
+          <p className="muted">
+            {"Don't have an account? "}
+            <button
+              className="text-link"
+              type="button"
+              onClick={() => setShowRegister(true)}
+            >
+              Register
+            </button>
+          </p>
+        </div>
+      </div>
+    </section>
+  );
 
-        {toast && (
-          <div
-            className={`mb-6 rounded-2xl border p-4 text-sm ${
-              toast.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-rose-200 bg-rose-50 text-rose-900"
-            }`}
-          >
-            {toast.message}
-          </div>
-        )}
-
+  const renderCandidateForm = () => (
+    <section className="view-wrap">
+      <div className="panel form-panel">
+        <h2>Candidate Application</h2>
+        <p className="muted">Apply to become a candidate in upcoming elections</p>
         {!user && (
-          <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard
-              title="New voter registration"
-              subtitle="Provision your account and receive an OTP via email."
-            >
-              <form className="space-y-3" onSubmit={handleRegister}>
-                <input
-                  name="stdId"
-                  placeholder="Student ID"
-                  required
-                  disabled={isBusy}
-                />
-                <input
-                  name="name"
-                  placeholder="Full name"
-                  required
-                  disabled={isBusy}
-                />
-                <input
-                  name="email"
-                  placeholder="Institutional email"
-                  type="email"
-                  required
-                  disabled={isBusy}
-                />
-                <input
-                  name="faculty"
-                  placeholder="Faculty"
-                  disabled={isBusy}
-                />
-                <input
-                  name="department"
-                  placeholder="Department"
-                  disabled={isBusy}
-                />
-                <input
-                  name="password"
-                  placeholder="Create a password"
-                  type="password"
-                  required
-                  disabled={isBusy}
-                />
-                <button type="submit" disabled={isBusy}>
-                  {isBusy ? "Submitting..." : "Register & send OTP"}
-                </button>
-              </form>
-            </SectionCard>
-
-            <SectionCard
-              title="Secure login"
-              subtitle="Verified voters can authenticate with JWT."
-            >
-              <form className="space-y-3" onSubmit={handleLogin}>
-                <input
-                  name="stdId"
-                  placeholder="Student ID"
-                  required
-                  disabled={isBusy}
-                />
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="Password"
-                  required
-                  disabled={isBusy}
-                />
-                <button type="submit" disabled={isBusy}>
-                  {isBusy ? "Signing in..." : "Login"}
-                </button>
-              </form>
-              <p className="mt-4 text-sm text-slate-500">
-                Need to verify your OTP?{" "}
-                <button
-                  type="button"
-                  className="text-indigo-600"
-                  onClick={() => {
-                    setShowOtp(true);
-                  }}
-                >
-                  Open OTP form
-                </button>
-              </p>
-            </SectionCard>
-          </div>
+          <div className="empty-state">Please login to submit your application.</div>
         )}
-
-        {showOtp && !user && (
-          <div className="mt-6">
-            <SectionCard
-              title="OTP verification"
-              subtitle="Submit the 6 digit code from your inbox."
-              actions={
-                <button type="button" onClick={resendOtp}>
-                  Resend code
-                </button>
-              }
-            >
-              <form className="space-y-3" onSubmit={handleOtp}>
-                <input
-                  name="stdId"
-                  placeholder="Student ID"
-                  value={otpStdId}
-                  onChange={(e) => setOtpStdId(e.target.value)}
-                  required
-                />
-                <input
-                  name="code"
-                  placeholder="OTP code"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  required
-                />
-                <button type="submit">Verify OTP</button>
-              </form>
-            </SectionCard>
-          </div>
-        )}
-
         {user && (
-          <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard
-              title="Active elections"
-              subtitle="Monitor timelines, candidates, and statuses."
-            >
-              <div className="space-y-4">
+          <form className="stack" onSubmit={handleCandidateSubmit}>
+            <div className="field">
+              <label>Select Election *</label>
+              <select
+                value={candidateForm.electionId}
+                required
+                onChange={(event) =>
+                  setCandidateForm((prev) => ({
+                    ...prev,
+                    electionId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Choose an election</option>
                 {elections.map((election) => (
-                  <div
-                    key={election.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-lg font-semibold">
-                          {election.title}
-                        </h3>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">
-                          {formatWindow(election.startTime, election.endTime)}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        {election.status}
-                      </span>
+                  <option key={election.id} value={election.id}>
+                    {election.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Full Name *</label>
+              <input
+                value={candidateForm.name}
+                onChange={(event) =>
+                  setCandidateForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Political Party *</label>
+              <input
+                value={candidateForm.party}
+                onChange={(event) =>
+                  setCandidateForm((prev) => ({ ...prev, party: event.target.value }))
+                }
+                required
+                placeholder="e.g., Democratic Party, Independent"
+              />
+            </div>
+            <div className="field">
+              <label>Photo URL</label>
+              <input
+                type="url"
+                value={candidateForm.photoUrl}
+                placeholder="https://example.com/photo.jpg"
+                onChange={(event) =>
+                  setCandidateForm((prev) => ({
+                    ...prev,
+                    photoUrl: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Manifesto / Platform</label>
+              <textarea
+                rows={4}
+                value={candidateForm.manifesto}
+                placeholder="Describe your platform and what you stand for"
+                onChange={(event) =>
+                  setCandidateForm((prev) => ({
+                    ...prev,
+                    manifesto: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div className="action-row">
+              <button
+                className="primary-btn"
+                type="submit"
+                disabled={loading.candidate}
+              >
+                {loading.candidate ? "Submitting..." : "Submit Application"}
+              </button>
+              <button
+                className="secondary-btn"
+                type="button"
+                onClick={() => setCandidateForm(initialCandidateForm)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </section>
+  );
+
+  const renderElections = () => (
+    <section className="view-wrap">
+      <div className="section-heading">
+        <h2>Available Elections</h2>
+        <p className="muted">View and participate in ongoing and upcoming elections</p>
+      </div>
+      {elections.length === 0 ? (
+        <div className="empty-state">No elections available</div>
+      ) : (
+        elections.map((election) => (
+          <article className="election-card" key={election.id}>
+            <div className="card-header">
+              <div>
+                <h3>{election.title}</h3>
+                <p className="muted">{election.description}</p>
+              </div>
+              <span className={`status-pill status-${election.status.toLowerCase()}`}>
+                {election.status}
+              </span>
+            </div>
+            <p className="muted">
+              Start: {formatSomaliaTime(election.startTime)}
+              <br />
+              End: {formatSomaliaTime(election.endTime)}
+            </p>
+            {election.candidates.length === 0 ? (
+              <p className="muted">No approved candidates yet.</p>
+            ) : (
+              <div className="candidate-list">
+                {election.candidates.map((candidate) => (
+                  <div className="candidate-row" key={candidate.id}>
+                    <div>
+                      <strong>{candidate.name}</strong>
+                      <p className="muted">{candidate.party ?? "Independent"}</p>
                     </div>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {election.description}
-                    </p>
-                    <div className="mt-4 space-y-2">
-                      {election.candidates.length ? (
-                        election.candidates.map((candidate) => (
-                          <div
-                            key={candidate.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 p-3"
-                          >
-                            <div>
-                              <p className="font-semibold">{candidate.name}</p>
-                              <p className="text-xs text-slate-500">
-                                {candidate.party ?? "Independent"}
-                              </p>
-                            </div>
-                            {election.status === "OPEN" && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleVote(election.id, candidate.id)
-                                }
-                              >
-                                Vote
-                              </button>
-                            )}
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm text-slate-500">
-                          No approved candidates yet.
-                        </p>
-                      )}
-                    </div>
-                    <div className="mt-4 flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => loadResults(election.id)}
-                        className="bg-slate-900 text-sm"
-                      >
-                        Refresh results
-                      </button>
-                      {results[election.id] && (
-                        <div className="text-sm text-slate-600">
-                          Live votes:{" "}
-                          <strong>
-                            {results[election.id]?.reduce(
-                              (sum, row) => sum + row.votes,
-                              0,
-                            )}
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-                    {results[election.id] && (
-                      <div className="mt-4 space-y-2 text-sm">
-                        {results[election.id]!.map((row) => (
-                          <div
-                            key={row.id}
-                            className="flex items-center justify-between rounded-xl border border-slate-100 p-3"
-                          >
-                            <span>
-                              {row.name}{" "}
-                              <span className="text-xs text-slate-500">
-                                {row.party ?? "Independent"}
-                              </span>
-                            </span>
-                            <strong>{row.votes} votes</strong>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      disabled={election.status !== "OPEN"}
+                      onClick={() => handleVote(election.id, candidate.id)}
+                    >
+                      {election.status === "OPEN" ? "Vote" : election.status}
+                    </button>
                   </div>
                 ))}
               </div>
-            </SectionCard>
-
-            {isAdmin && (
-              <div className="space-y-6">
-                <SectionCard
-                  title="Create election"
-                  subtitle="Define windows and copy candidates later."
-                >
-                  <form
-                    className="space-y-3"
-                    onSubmit={handleCreateElection}
-                  >
-                    <input name="title" placeholder="Title" required />
-                    <textarea
-                      name="description"
-                      placeholder="Description"
-                      className="min-h-[80px]"
-                    />
-                    <label className="block text-sm text-slate-500">
-                      Start time
-                      <input
-                        name="startTime"
-                        type="datetime-local"
-                        required
-                      />
-                    </label>
-                    <label className="block text-sm text-slate-500">
-                      End time
-                      <input name="endTime" type="datetime-local" required />
-                    </label>
-                    <button type="submit">Save election</button>
-                  </form>
-                </SectionCard>
-                <SectionCard
-                  title="Student CSV import"
-                  subtitle="Upsert student accounts with stdId and email."
-                >
-                  <form className="space-y-3" onSubmit={handleImport}>
-                    <input name="file" type="file" accept=".csv" required />
-                    <button type="submit">Upload CSV</button>
-                  </form>
-                </SectionCard>
-              </div>
             )}
-          </div>
-        )}
+          </article>
+        ))
+      )}
+    </section>
+  );
+
+  const renderAdmin = () => (
+    <section className="view-wrap">
+      <div className="section-heading">
+        <h2>Admin Dashboard</h2>
+        <p className="muted">Manage elections, candidates, users, and system settings</p>
       </div>
+      {user?.role !== "ADMIN" ? (
+        <div className="empty-state">Admin access is required to view this area.</div>
+      ) : (
+        <>
+          <div className="admin-tabs">
+            {adminTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`admin-tab ${tab.id === adminTab ? "active" : ""}`}
+                onClick={() => setAdminTab(tab.id)}
+              >
+                <span className="tab-icon">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {adminTab === "elections" && (
+            <div className="panel admin-panel">
+              <div className="admin-heading">
+                <div>
+                  <h3>Election Management</h3>
+                  <p className="muted">All times are shown in Somalia Time (GMT+3)</p>
+                </div>
+                <button
+                  className="primary-btn"
+                  type="button"
+                  onClick={() => setShowCreateForm((prev) => !prev)}
+                >
+                  {showCreateForm ? "Close" : "+ Create Election"}
+                </button>
+              </div>
+              {showCreateForm && (
+                <form className="stack" onSubmit={handleCreateElection}>
+                  <div className="field">
+                    <label>Title</label>
+                    <input name="title" required />
+                  </div>
+                  <div className="field">
+                    <label>Description</label>
+                    <textarea name="description" rows={3} />
+                  </div>
+                  <div className="field">
+                    <label>Start Time</label>
+                    <input name="startTime" type="datetime-local" required />
+                  </div>
+                  <div className="field">
+                    <label>End Time</label>
+                    <input name="endTime" type="datetime-local" required />
+                  </div>
+                  <button className="primary-btn" type="submit" disabled={loading.election}>
+                    {loading.election ? "Saving..." : "Save Election"}
+                  </button>
+                </form>
+              )}
+              {elections.length === 0 && <div className="empty-state">No elections yet.</div>}
+              {elections.map((election) => (
+                <article className="election-card" key={election.id}>
+                  <div className="card-header">
+                    <div>
+                      <h3>{election.title}</h3>
+                      <p className="muted">{election.description}</p>
+                    </div>
+                    <span className={`status-pill status-${election.status.toLowerCase()}`}>
+                      {election.status}
+                    </span>
+                  </div>
+                  <p className="muted">
+                    Start: {formatSomaliaTime(election.startTime)}
+                    <br />
+                    End: {formatSomaliaTime(election.endTime)}
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
+          {adminTab === "candidates" && (
+            <div className="panel admin-panel">
+              <h3>Candidate Management</h3>
+              {candidateReviews.length === 0 ? (
+                <div className="empty-state">No pending applications</div>
+              ) : (
+                candidateReviews.map((candidate) => (
+                  <div className="candidate-card" key={candidate.id}>
+                    <div className="candidate-header">
+                      <div className="avatar-circle">
+                        {candidate.photoUrl ? (
+                          <img src={candidate.photoUrl} alt={candidate.name} />
+                        ) : (
+                          <span>{candidate.name.charAt(0)}</span>
+                        )}
+                      </div>
+                      <div>
+                        <strong>{candidate.name}</strong>
+                        <p className="muted">
+                          {(candidate.party ?? "Independent") +
+                            " - " +
+                            candidate.election.title}
+                        </p>
+                      </div>
+                      <span className="status-pill">Pending</span>
+                    </div>
+                    <p className="muted">
+                      Manifesto: {candidate.manifesto ?? "Not provided"}
+                    </p>
+                    <div className="action-row">
+                      <button
+                        className="primary-btn"
+                        type="button"
+                        onClick={() => handleCandidateApproval(candidate.id, true)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="danger-btn"
+                        type="button"
+                        onClick={() => handleCandidateApproval(candidate.id, false)}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          {adminTab === "users" && (
+            <div className="panel admin-panel">
+              <h3>Users</h3>
+              {userDirectory.length === 0 ? (
+                <div className="empty-state">No users found.</div>
+              ) : (
+                <div className="user-table">
+                  <div className="user-row user-row-header">
+                    <span>Name</span>
+                    <span>Student ID</span>
+                    <span>Status</span>
+                  </div>
+                  {userDirectory.map((entry) => (
+                    <div className="user-row" key={entry.id}>
+                      <span>{entry.name}</span>
+                      <span>{entry.stdId}</span>
+                      <span>{entry.isVerified ? "Verified" : "Pending"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {adminTab === "technical" && (
+            <div className="panel admin-panel">
+              <h3>Technical Support</h3>
+              <p className="muted">
+                Reach out to the technical team for infrastructure, monitoring, and
+                incident response support.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+
+  return (
+    <div className="app-shell">
+      <header className="top-bar">
+        <button className="brand" type="button" onClick={() => setView("landing")}>
+          <span className="brand-icon">VS</span>
+          <strong>VoteSecure</strong>
+        </button>
+        <div className="nav-links">
+          <button
+            type="button"
+            className={`nav-link ${view === "candidate" ? "active" : ""}`}
+            onClick={() => setView("candidate")}
+          >
+            Apply as Candidate
+          </button>
+          <button
+            type="button"
+            className={`nav-link ${view === "admin" ? "active" : ""}`}
+            onClick={() => setView("admin")}
+          >
+            Admin Panel
+          </button>
+          <button
+            type="button"
+            className={`nav-link ${view === "elections" ? "active" : ""}`}
+            onClick={() => setView("elections")}
+          >
+            Elections
+          </button>
+          {user ? (
+            <div className="nav-auth">
+              <div className="nav-avatar">{userInitials}</div>
+              <button className="text-link" type="button" onClick={handleLogout}>
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <button
+              className="primary-btn"
+              type="button"
+              onClick={() => setView("landing")}
+            >
+              Sign In
+            </button>
+          )}
+        </div>
+      </header>
+      <p className="login-hint">Please login to access voting features</p>
+      <main className="main-content">
+        {view === "landing" && renderLanding()}
+        {view === "candidate" && renderCandidateForm()}
+        {view === "elections" && renderElections()}
+        {view === "admin" && renderAdmin()}
+      </main>
+      {showRegister && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>Create account</h3>
+            <form className="stack" onSubmit={handleRegister}>
+              <div className="field">
+                <label>Student ID</label>
+                <input name="stdId" required />
+              </div>
+              <div className="field">
+                <label>Full name</label>
+                <input name="name" required />
+              </div>
+              <div className="field">
+                <label>Email</label>
+                <input name="email" type="email" required />
+              </div>
+              <div className="field">
+                <label>Faculty</label>
+                <input name="faculty" />
+              </div>
+              <div className="field">
+                <label>Department</label>
+                <input name="department" />
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input name="password" type="password" required />
+              </div>
+              <div className="action-row">
+                <button
+                  className="primary-btn"
+                  type="submit"
+                  disabled={loading.register}
+                >
+                  {loading.register ? "Submitting..." : "Register"}
+                </button>
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={() => setShowRegister(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {showOtp && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>Verify OTP</h3>
+            <form className="stack" onSubmit={handleOtp}>
+              <div className="field">
+                <label>Student ID</label>
+                <input
+                  name="stdId"
+                  value={otpStdId}
+                  onChange={(event) => setOtpStdId(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label>OTP code</label>
+                <input name="code" maxLength={6} pattern="\\d{6}" required />
+              </div>
+              <div className="action-row">
+                <button
+                  className="primary-btn"
+                  type="submit"
+                  disabled={loading.otp}
+                >
+                  {loading.otp ? "Verifying..." : "Verify"}
+                </button>
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={resendOtp}
+                >
+                  Resend code
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {toast && (
+        <div className={`toast ${toast.type === "error" ? "error" : ""}`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
 
 export default App;
+
+
+

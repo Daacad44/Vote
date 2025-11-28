@@ -132,8 +132,7 @@ function App() {
     candidate: false,
     election: false,
   });
-  const [showRegister, setShowRegister] = useState(false);
-  const [showOtp, setShowOtp] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register" | "otp">("login");
   const [otpStdId, setOtpStdId] = useState("");
   const [candidateForm, setCandidateForm] = useState(initialCandidateForm);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -141,6 +140,7 @@ function App() {
   const [forceAuth, setForceAuth] = useState(() => {
     return !localStorage.getItem("votesecure.user");
   });
+  const showAuthOverlay = !user && (forceAuth || authMode !== "login");
 
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isAdmin = Boolean(user && (user.role === "ADMIN" || isSuperAdmin));
@@ -322,8 +322,8 @@ function App() {
       await api("/auth/register", { method: "POST", body: payload });
       notify("Registration successful. Check your email for the OTP code.");
       setOtpStdId(payload.stdId as string);
-      setShowRegister(false);
-      setShowOtp(true);
+      setForceAuth(true);
+      setAuthMode("otp");
       event.currentTarget.reset();
     } catch (error) {
       notify((error as Error).message, "error");
@@ -343,7 +343,8 @@ function App() {
         body: payload,
       });
       notify("OTP verified. You can now log in.");
-      setShowOtp(false);
+      setAuthMode("login");
+      setForceAuth(true);
       event.currentTarget.reset();
     } catch (error) {
       notify((error as Error).message, "error");
@@ -554,7 +555,10 @@ function App() {
             <button
               className="text-link"
               type="button"
-              onClick={() => setShowRegister(true)}
+              onClick={() => {
+                setForceAuth(true);
+                setAuthMode("register");
+              }}
             >
               Register
             </button>
@@ -1170,127 +1174,136 @@ function App() {
         {view === "elections" && renderElections()}
         {view === "admin" && renderAdmin()}
       </main>
-      {showRegister && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>Create account</h3>
-            <form className="stack" onSubmit={handleRegister}>
-              <div className="field">
-                <label>Student ID</label>
-                <input name="stdId" required />
-              </div>
-              <div className="field">
-                <label>Full name</label>
-                <input name="name" required />
-              </div>
-              <div className="field">
-                <label>Email</label>
-                <input name="email" type="email" required />
-              </div>
-              <div className="field">
-                <label>Faculty</label>
-                <input name="faculty" />
-              </div>
-              <div className="field">
-                <label>Department</label>
-                <input name="department" />
-              </div>
-              <div className="field">
-                <label>Password</label>
-                <input name="password" type="password" required />
-              </div>
-              <div className="action-row">
-                <button
-                  className="primary-btn"
-                  type="submit"
-                  disabled={loading.register}
-                >
-                  {loading.register ? "Submitting..." : "Register"}
-                </button>
-                <button
-                  className="secondary-btn"
-                  type="button"
-                  onClick={() => setShowRegister(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {showOtp && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>Verify OTP</h3>
-            <form className="stack" onSubmit={handleOtp}>
-              <div className="field">
-                <label>Student ID</label>
-                <input
-                  name="stdId"
-                  value={otpStdId}
-                  onChange={(event) => setOtpStdId(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label>OTP code</label>
-                <input name="code" maxLength={6} pattern="\\d{6}" required />
-              </div>
-              <div className="action-row">
-                <button
-                  className="primary-btn"
-                  type="submit"
-                  disabled={loading.otp}
-                >
-                  {loading.otp ? "Verifying..." : "Verify"}
-                </button>
-                <button
-                  className="secondary-btn"
-                  type="button"
-                  onClick={resendOtp}
-                >
-                  Resend code
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {toast && (
         <div className={`toast ${toast.type === "error" ? "error" : ""}`}>
           {toast.message}
         </div>
       )}
-      {forceAuth && !user && (
+      {showAuthOverlay && (
         <div className="auth-overlay">
           <div className="modal">
-            <h3>Login required</h3>
-            <p className="muted">Sign in to unlock elections, candidacy, and admin tools.</p>
-            <form className="stack" onSubmit={handleLogin}>
-              <div className="field">
-                <label>Student ID / Email</label>
-                <input name="stdId" required disabled={loading.login} />
-              </div>
-              <div className="field">
-                <label>Password</label>
-                <input
-                  name="password"
-                  type="password"
-                  required
-                  disabled={loading.login}
-                />
-              </div>
-              <button className="primary-btn" type="submit" disabled={loading.login}>
-                {loading.login ? "Signing in..." : "Sign In"}
-              </button>
-            </form>
-            <p className="muted">
-              Don&apos;t have an account?{" "}
-              <button className="text-link" type="button" onClick={() => setShowRegister(true)}>
-                Register now
-              </button>
-            </p>
+            {authMode === "login" && (
+              <>
+                <h3>Login required</h3>
+                <p className="muted">Sign in to unlock elections, candidacy, and admin tools.</p>
+                <form className="stack" onSubmit={handleLogin}>
+                  <div className="field">
+                    <label>Student ID / Email</label>
+                    <input name="stdId" required disabled={loading.login} />
+                  </div>
+                  <div className="field">
+                    <label>Password</label>
+                    <input
+                      name="password"
+                      type="password"
+                      required
+                      disabled={loading.login}
+                    />
+                  </div>
+                  <button className="primary-btn" type="submit" disabled={loading.login}>
+                    {loading.login ? "Signing in..." : "Sign In"}
+                  </button>
+                </form>
+                <p className="muted">
+                  Don&apos;t have an account?{" "}
+                  <button
+                    className="text-link"
+                    type="button"
+                    onClick={() => {
+                      setForceAuth(true);
+                      setAuthMode("register");
+                    }}
+                  >
+                    Register now
+                  </button>
+                </p>
+              </>
+            )}
+            {authMode === "register" && (
+              <>
+                <h3>Create account</h3>
+                <form className="stack" onSubmit={handleRegister}>
+                  <div className="field">
+                    <label>Student ID</label>
+                    <input name="stdId" required />
+                  </div>
+                  <div className="field">
+                    <label>Full name</label>
+                    <input name="name" required />
+                  </div>
+                  <div className="field">
+                    <label>Email</label>
+                    <input name="email" type="email" required />
+                  </div>
+                  <div className="field">
+                    <label>Faculty</label>
+                    <input name="faculty" />
+                  </div>
+                  <div className="field">
+                    <label>Department</label>
+                    <input name="department" />
+                  </div>
+                  <div className="field">
+                    <label>Password</label>
+                    <input name="password" type="password" required />
+                  </div>
+                  <div className="action-row">
+                    <button
+                      className="primary-btn"
+                      type="submit"
+                      disabled={loading.register}
+                    >
+                      {loading.register ? "Submitting..." : "Register"}
+                    </button>
+                    <button
+                      className="secondary-btn"
+                      type="button"
+                      onClick={() => setAuthMode("login")}
+                    >
+                      Back to login
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+            {authMode === "otp" && (
+              <>
+                <h3>Verify OTP</h3>
+                <p className="muted">
+                  Enter the 6-digit code sent to your email to complete registration.
+                </p>
+                <form className="stack" onSubmit={handleOtp}>
+                  <div className="field">
+                    <label>Student ID</label>
+                    <input
+                      name="stdId"
+                      value={otpStdId}
+                      onChange={(event) => setOtpStdId(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label>OTP code</label>
+                    <input name="code" maxLength={6} pattern="\\d{6}" required />
+                  </div>
+                  <div className="action-row">
+                    <button className="primary-btn" type="submit" disabled={loading.otp}>
+                      {loading.otp ? "Verifying..." : "Verify"}
+                    </button>
+                    <button className="secondary-btn" type="button" onClick={resendOtp}>
+                      Resend code
+                    </button>
+                  </div>
+                </form>
+                <button
+                  className="text-link"
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                >
+                  Back to login
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -140,7 +140,11 @@ function App() {
   const [forceAuth, setForceAuth] = useState(() => {
     return !localStorage.getItem("votesecure.user");
   });
-  const showAuthOverlay = !user && (forceAuth || authMode !== "login");
+  const showAuthOverlay =
+    !token ||
+    !user ||
+    forceAuth ||
+    authMode !== "login";
 
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isAdmin = Boolean(user && (user.role === "ADMIN" || isSuperAdmin));

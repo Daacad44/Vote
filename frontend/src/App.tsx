@@ -138,6 +138,9 @@ function App() {
   const [candidateForm, setCandidateForm] = useState(initialCandidateForm);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [roleMutationId, setRoleMutationId] = useState<string | null>(null);
+  const [forceAuth, setForceAuth] = useState(() => {
+    return !localStorage.getItem("votesecure.user");
+  });
 
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const isAdmin = Boolean(user && (user.role === "ADMIN" || isSuperAdmin));
@@ -216,6 +219,9 @@ function App() {
       return;
     }
     localStorage.setItem("votesecure.user", JSON.stringify(user));
+    if (user) {
+      setForceAuth(false);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -296,6 +302,7 @@ function App() {
       });
       setToken(data.token);
       setUser(data.user);
+      setForceAuth(false);
       notify(`Welcome back, ${data.user.name}!`);
       event.currentTarget.reset();
       setView("elections");
@@ -367,6 +374,7 @@ function App() {
     setView("landing");
     setResults({});
     setLogs([]);
+    setForceAuth(true);
     notify("Signed out.");
   };
 
@@ -1252,6 +1260,38 @@ function App() {
       {toast && (
         <div className={`toast ${toast.type === "error" ? "error" : ""}`}>
           {toast.message}
+        </div>
+      )}
+      {forceAuth && !user && (
+        <div className="auth-overlay">
+          <div className="modal">
+            <h3>Login required</h3>
+            <p className="muted">Sign in to unlock elections, candidacy, and admin tools.</p>
+            <form className="stack" onSubmit={handleLogin}>
+              <div className="field">
+                <label>Student ID / Email</label>
+                <input name="stdId" required disabled={loading.login} />
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  disabled={loading.login}
+                />
+              </div>
+              <button className="primary-btn" type="submit" disabled={loading.login}>
+                {loading.login ? "Signing in..." : "Sign In"}
+              </button>
+            </form>
+            <p className="muted">
+              Don&apos;t have an account?{" "}
+              <button className="text-link" type="button" onClick={() => setShowRegister(true)}>
+                Register now
+              </button>
+            </p>
+          </div>
         </div>
       )}
     </div>
